@@ -5,30 +5,29 @@ __lua__
 consts = {
 	top_of_buckets = 104,
 	num_buckets = 10,
-	num_pegs = 8,
+	num_peg_rows = 9,
 }
 
 state = {
 	debug_text = "",
 	timers = {},
+	money = 1,
+	buckets = {},
 }
 
 function _init()
 	coin = new_coin(1)
-	buckets = {}
+	state.buckets = {}
 	start_x = 64 - (8 * (consts.num_buckets / 2 + 1)) + 1
 	bucket_value = flr(consts.num_buckets / 2)
 	for i = 1, consts.num_buckets do
-		add(buckets, new_bucket(bucket_value, start_x + i * 8))
+		add(state.buckets, new_bucket(bucket_value, start_x + i * 8))
 		if i < consts.num_buckets / 2 then
 			bucket_value -= 1
 		elseif i > consts.num_buckets / 2 then
 			bucket_value += 1
 		end
 	end
-	wait_then_do(10000, function()
-		state.debug_text = "10 seconds have passed!"
-	end)
 end
 
 function _update()
@@ -47,7 +46,7 @@ function _draw()
 	map(0,0,0,0)
 	coin.draw()
 	draw_pegs()
-	for b in all(buckets) do
+	for b in all(state.buckets) do
 		b.draw()
 	end
 	print(state.debug_text, 0, 0, 7)
@@ -149,9 +148,9 @@ function new_vector(x, y)
 end
 
 function draw_pegs(x, y)
-	for row=1,consts.num_pegs do
-		local num_pegs = row + 1
-		local y = 40 + (row-1)*8
+	for row=1,consts.num_peg_rows do
+		local num_pegs = row
+		local y = 32 + (row-1)*8
 		local total_width = (num_pegs-1)*8
 		local start_x = 64 - total_width/2
 		for i=0,num_pegs-1 do
@@ -189,11 +188,11 @@ coin_state = {
 function new_coin(level)
 	local coin = {}
 
-	coin.pos = new_point(62, 32)
+	coin.pos = new_point(62, 25)
 	coin.state = coin_state.initial_drop
 	coin.speed = 0.7
 	coin.level = level or 1
-	coin.value = 0
+	coin.value_multiplier = 1
 	coin.target_x = 0
 	coin.target_y = 0
 
@@ -217,14 +216,20 @@ function new_coin(level)
 
 	function update_initial_drop()
 		coin.pos.y += coin.speed
-		coin.pos.y = min(coin.pos.y, 45)  -- prevent going above 32
-		if coin.pos.y == 45 then
+		coin.pos.y = min(coin.pos.y, 29)  -- prevent going above 32
+		if coin.pos.y == 29 then
 			coin.state = coin_state.dropping
 			pick_target()
 		end
 	end
 
 	function update_dropping()
+		if coin.pos.y == consts.top_of_buckets then
+			enter_bucket()
+			coin.pos = new_point(-200, -200)  -- reset position
+			return
+		end
+
 		if coin.pos.x < coin.target_x then
 			coin.pos.x += coin.speed * 2
 			coin.pos.x = min(coin.pos.x, coin.target_x)
@@ -235,8 +240,27 @@ function new_coin(level)
 		coin.pos.y += coin.speed
 		coin.pos.y = min(coin.pos.y, coin.target_y)
 
+
 		if coin.pos.x == coin.target_x and coin.pos.y == coin.target_y then
 			pick_target()  -- pick a new target for the next drop
+		end
+	end
+
+	function enter_bucket()
+		for bucket in all(state.buckets) do
+			if coin.pos.x >= bucket.pos.x and coin.pos.x <= bucket.pos.x + 8 then
+				-- coin.value = bucket.value
+				local money_earned = coin.value_multiplier * bucket.value
+				state.money += money_earned
+				bucket.state = bucket_state.full
+				state.debug_text = "you earned: " ..  money_earned .. " coins!"
+				sfx(1)
+				wait_then_do(1000, function()
+					state.debug_text = ""
+					bucket.state = bucket_state.empty
+				end)
+				return true
+			end
 		end
 	end
 
@@ -265,7 +289,7 @@ new_bucket = function(value, x)
 	local bucket = {}
 	bucket.value = value
 	bucket.pos = new_point(x, consts.top_of_buckets)
-	bucket.state = bucket_state.full
+	bucket.state = bucket_state.empty
 
 	bucket.update = function()
 	end
@@ -326,4 +350,5 @@ __map__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
-990100002201000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
+980100002203000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
+001000003805538055380550000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005
