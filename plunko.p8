@@ -13,11 +13,18 @@ state = {
 	timers = {},
 	money = 1,
 	buckets = {},
+	special_coins = {
+		red = 0,
+	},
+	fallings_coins = {},
+	coin_cost = 1,
+	earnings_text = "",
+	disable_button_drop = false,
 }
 
 function _init()
-	coin = new_coin(1)
 	state.buckets = {}
+	drop_button = new_button()
 	start_x = 64 - (8 * (consts.num_buckets / 2 + 1)) + 1
 	bucket_value = flr(consts.num_buckets / 2)
 	for i = 1, consts.num_buckets do
@@ -32,26 +39,86 @@ end
 
 function _update()
 	update_timers()
-	coin.update()
-	if btnp(⬅️) then
-		coin.pos.x -= 1
-	end
-	if btnp(➡️) then
-		coin.pos.x += 1
+	update_board()
+	drop_button:update()
+	for coin in all(state.fallings_coins) do
+		coin.update()
 	end
 end
 
 function _draw()
 	cls(1)
 	map(0,0,0,0)
-	coin.draw()
+	draw_board()
+	drop_button:draw()
+	for coin in all(state.fallings_coins) do
+		coin.draw()
+	end
 	draw_pegs()
 	for b in all(state.buckets) do
 		b.draw()
 	end
+	print(state.earnings_text, 126 - #state.earnings_text * 4, 9, 11)
 	print(state.debug_text, 0, 0, 7)
+
 end
 
+function draw_board()
+	local coins_str = "" .. state.money
+	print(coins_str, 126 - #coins_str * 4, 2, 7)
+end
+
+function update_board()
+	local can_drop_coin = not is_button_drop_disabled()
+	if btnp(❎) and can_drop_coin then
+		if state.special_coins.red > 0 then
+			state.special_coins.red -= 1
+			add(state.fallings_coins, new_coin(coin_types.red))  -- red coin
+		else
+			add(state.fallings_coins, new_coin(coin_types.gold))  -- gold coin
+		end
+		state.money -= state.coin_cost
+	end
+end
+
+function is_button_drop_disabled()
+	return state.disable_button_drop or state.money < state.coin_cost
+end
+
+function new_button()
+	return {
+		update = function(self)
+			if self.waiting_to_reset then
+				-- do nothing
+				return
+			end
+
+			local disabled = is_button_drop_disabled()
+			if btnp(❎) and not disabled then
+				state.disable_button_drop = true
+				sfx(2)
+				wait_then_do(1000, function()
+					state.disable_button_drop = false
+				end)
+			end
+		end,
+
+		draw = function(self)
+			local start_x = 44
+			local start_y = 20
+
+			local disabled = is_button_drop_disabled()
+			local color = (not disabled and 12 or 13)
+
+			rectfill(start_x, start_y, start_x + 40, start_y + 10, color)
+			-- draw sides to make it look rounded on corners
+			line(start_x - 1, start_y + 1, start_x - 1, start_y + 9, color)
+			line(start_x + 41, start_y + 1, start_x + 41, start_y + 9, color)
+
+			print("press ❎", start_x + 5, start_y + 3, 7)
+		end,
+	}	
+end
 
 -->8
 -- utils
@@ -158,7 +225,6 @@ function draw_pegs(x, y)
 			spr(17, x, y)
 		end
 	end
-	-- spr(17, x, y)
 end
 
 function wait_then_do(milliseconds, callback)
@@ -185,6 +251,11 @@ coin_state = {
 	dropping = 2,
 }
 
+coin_types = {
+	gold = 1,
+	red = 2,
+}
+
 function new_coin(level)
 	local coin = {}
 
@@ -196,7 +267,7 @@ function new_coin(level)
 	coin.target_x = 0
 	coin.target_y = 0
 
-	function pick_target()
+	coin.pick_target = function()
 		if coin.pos.y > consts.top_of_buckets - 6 then
 			coin.target_x = coin.pos.x
 			coin.target_y = consts.top_of_buckets
@@ -213,20 +284,19 @@ function new_coin(level)
 		sfx(0)
 	end
 
-
-	function update_initial_drop()
+	coin.update_initial_drop = function()
 		coin.pos.y += coin.speed
 		coin.pos.y = min(coin.pos.y, 29)  -- prevent going above 32
 		if coin.pos.y == 29 then
 			coin.state = coin_state.dropping
-			pick_target()
+			coin.pick_target()
 		end
 	end
 
-	function update_dropping()
+	coin.update_dropping = function()
 		if coin.pos.y == consts.top_of_buckets then
-			enter_bucket()
-			coin.pos = new_point(-200, -200)  -- reset position
+			coin.enter_bucket()
+			-- coin.pos = new_point(-200, -200)  -- reset position
 			return
 		end
 
@@ -242,23 +312,24 @@ function new_coin(level)
 
 
 		if coin.pos.x == coin.target_x and coin.pos.y == coin.target_y then
-			pick_target()  -- pick a new target for the next drop
+			coin.pick_target()  -- pick a new target for the next drop
 		end
 	end
 
-	function enter_bucket()
+	coin.enter_bucket = function()
 		for bucket in all(state.buckets) do
 			if coin.pos.x >= bucket.pos.x and coin.pos.x <= bucket.pos.x + 8 then
 				-- coin.value = bucket.value
 				local money_earned = coin.value_multiplier * bucket.value
 				state.money += money_earned
 				bucket.state = bucket_state.full
-				state.debug_text = "you earned: " ..  money_earned .. " coins!"
+				state.earnings_text = "+" .. money_earned
+
 				sfx(1)
 				wait_then_do(1000, function()
-					state.debug_text = ""
 					bucket.state = bucket_state.empty
 				end)
+				del(state.fallings_coins, coin)
 				return true
 			end
 		end
@@ -266,9 +337,9 @@ function new_coin(level)
 
 	coin.update = function(self)
 		if coin.state == coin_state.initial_drop then
-			update_initial_drop()
+			coin.update_initial_drop()
 		elseif coin.state == coin_state.dropping then
-			update_dropping()
+			coin.update_dropping()
 		end	
 	end
 
@@ -350,5 +421,6 @@ __map__
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000b0b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
-980100002203000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
-001000003805538055380550000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005
+990100002203000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
+011000003805538055380550000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005
+011000001955500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505
