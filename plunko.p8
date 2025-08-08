@@ -37,7 +37,7 @@ state = {
 	disable_button_drop = false,
 	mode = game_mode.drop,
 	auto_drop = true,
-	drop_delay = 10,
+	drop_delay = 1800,
 	user_level = 1,
 }
 
@@ -46,6 +46,7 @@ function _init()
 	drop_button = new_drop_button()
 	start_x = 64 - (8 * (consts.num_buckets / 2 + 1)) + 1
 	bucket_value = flr(consts.num_buckets / 2)
+	leveling = level_up_if_possible()
 	for i = 1, consts.num_buckets do
 		add(state.buckets, new_bucket(bucket_value, start_x + i * 8))
 		if i < consts.num_buckets / 2 then
@@ -62,6 +63,7 @@ function _update()
 	for coin in all(state.fallings_coins) do
 		coin.update()
 	end
+	leveling.update()
 
 	if state.mode == game_mode.drop then
 		update_board()
@@ -85,6 +87,7 @@ function _draw()
 			b.draw()
 		end
 		print(state.earnings_text, 126 - #state.earnings_text * 4, 9, 11)
+		leveling.draw()
 	elseif state.mode == game_mode.upgrade then
 		upgrades:draw()
 		-- cprint("coins: " .. state.money, 120, 7)
@@ -678,7 +681,7 @@ function level_up_if_possible()
 			elseif state.user_level == 6 then
 				state.coin_cost = 5
 			elseif state.user_level == 7 then
-				
+
 			end
 		-- else
 		-- 	state.debug_text = "not enough coins to level up"
@@ -686,14 +689,33 @@ function level_up_if_possible()
 		end,
 
 		draw = function()
-			-- local next_level = state.user_level + 1
-			-- if next_level <= #user_level_requirements then
-			-- 	local requirement = user_level_requirements[next_level]
-			-- 	print("level up to " .. next_level .. " costs: " .. requirement, 0, 120, 7)
-			-- else
-			-- 	print("max level reached", 0, 120, 7)
-			-- end
-		end,}
+			local bar_width = 80
+			local bar_height = 5
+			local padding = 24
+			local x = (128 - bar_width) / 2
+			local y = 122
+
+			local next_level = state.user_level + 1
+			if next_level <= #user_level_requirements then
+				local requirement = user_level_requirements[next_level]
+				local progress = min(state.money / requirement, 1)
+				-- background bar
+				rectfill(x, y, x + bar_width, y + bar_height, 5)
+				-- filled part
+				rectfill(x, y, x + flr(bar_width * progress), y + bar_height, 11)
+				-- border
+				rect(x, y, x + bar_width, y + bar_height, 7)
+				-- text
+				local txt = "lvl " .. next_level
+				local req = state.money .. "/" .. requirement
+				-- cprint(txt, y - 8, 7)
+				print(txt, 2, y, 7)
+				print(requirement, x + bar_width + 4, y, 7)
+			else
+				cprint("max level reached", y - 8, 7)
+			end
+		end,
+	}
 end
 
 __gfx__
