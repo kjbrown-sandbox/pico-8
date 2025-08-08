@@ -36,7 +36,7 @@ state = {
 	earnings_text = "",
 	disable_button_drop = false,
 	mode = game_mode.drop,
-	auto_drop = true,
+	auto_drop = false,
 	drop_delay = 1800,
 	user_level = 1,
 }
@@ -144,7 +144,7 @@ function new_drop_button()
 
 		draw = function(self)
 			local start_x = 44
-			local start_y = 20
+			local start_y = 15 
 
 			local disabled = is_button_drop_disabled()
 			local color = (not disabled and 12 or 13)
@@ -154,7 +154,11 @@ function new_drop_button()
 			-- line(start_x - 1, start_y + 1, start_x - 1, start_y + 9, color)
 			-- line(start_x + 41, start_y + 1, start_x + 41, start_y + 9, color)
 			local text = state.auto_drop and "auto drop" or "press ❎"
-			rounded_button_filled(start_x, start_y, start_x + 40, start_y + 10, text, color)
+			if state.auto_drop then
+				rounded_button_filled(start_x, start_y, start_x + 40, start_y + 10, text, color)
+			elseif not disabled then
+				rounded_button_filled(start_x, start_y, start_x + 40, start_y + 10, text, color)
+			end
 
 			-- print("press ❎", start_x + 5, start_y + 3, 7)
 		end,
@@ -667,7 +671,6 @@ function level_up_if_possible()
 		local next_level = state.user_level + 1
 		if state.money >= user_level_requirements[next_level] then
 			state.user_level = next_level
-			state.money -= user_level_requirements[next_level]
 			sfx(3)
 			-- state.debug_text = "level up! now at level " .. state.user_level
 
@@ -706,7 +709,7 @@ function level_up_if_possible()
 				-- border
 				rect(x, y, x + bar_width, y + bar_height, 7)
 				-- text
-				local txt = "lvl " .. next_level
+				local txt = "lvl " .. state.user_level
 				local req = state.money .. "/" .. requirement
 				-- cprint(txt, y - 8, 7)
 				print(txt, 2, y, 7)
