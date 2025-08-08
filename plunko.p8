@@ -8,10 +8,16 @@ consts = {
 	num_peg_rows = 9,
 }
 
+
+game_mode = {
+	drop = 1,
+	upgrade = 2,
+}
+
 state = {
 	debug_text = "",
 	timers = {},
-	money = 1,
+	money = 10,
 	buckets = {},
 	special_coins = {
 		red = 0,
@@ -20,11 +26,12 @@ state = {
 	coin_cost = 1,
 	earnings_text = "",
 	disable_button_drop = false,
+	mode = game_mode.drop,
 }
 
 function _init()
 	state.buckets = {}
-	drop_button = new_button()
+	drop_button = new_drop_button()
 	start_x = 64 - (8 * (consts.num_buckets / 2 + 1)) + 1
 	bucket_value = flr(consts.num_buckets / 2)
 	for i = 1, consts.num_buckets do
@@ -35,30 +42,42 @@ function _init()
 			bucket_value += 1
 		end
 	end
+	upgrades = new_upgrades()
 end
 
 function _update()
 	update_timers()
-	update_board()
-	drop_button:update()
 	for coin in all(state.fallings_coins) do
 		coin.update()
+	end
+
+	if state.mode == game_mode.drop then
+		update_board()
+		drop_button:update()
+	elseif state.mode == game_mode.upgrade then
+		upgrades:update()
 	end
 end
 
 function _draw()
 	cls(1)
-	map(0,0,0,0)
-	draw_board()
-	drop_button:draw()
-	for coin in all(state.fallings_coins) do
-		coin.draw()
+
+	if state.mode == game_mode.drop then
+		draw_board()
+		drop_button:draw()
+		for coin in all(state.fallings_coins) do
+			coin.draw()
+		end
+		draw_pegs()
+		for b in all(state.buckets) do
+			b.draw()
+		end
+		print(state.earnings_text, 126 - #state.earnings_text * 4, 9, 11)
+	elseif state.mode == game_mode.upgrade then
+		upgrades:draw()
+		-- cprint("coins: " .. state.money, 120, 7)
+		-- cprint("red coins: " .. state.special_coins.red, 120, 7)
 	end
-	draw_pegs()
-	for b in all(state.buckets) do
-		b.draw()
-	end
-	print(state.earnings_text, 126 - #state.earnings_text * 4, 9, 11)
 	print(state.debug_text, 0, 0, 7)
 
 end
@@ -70,7 +89,9 @@ end
 
 function update_board()
 	local can_drop_coin = not is_button_drop_disabled()
-	if btnp(❎) and can_drop_coin then
+	if btnp(🅾️) then
+		state.mode = game_mode.upgrade
+	elseif btnp(❎) and can_drop_coin then
 		if state.special_coins.red > 0 then
 			state.special_coins.red -= 1
 			add(state.fallings_coins, new_coin(coin_types.red))  -- red coin
@@ -85,7 +106,7 @@ function is_button_drop_disabled()
 	return state.disable_button_drop or state.money < state.coin_cost
 end
 
-function new_button()
+function new_drop_button()
 	return {
 		update = function(self)
 			if self.waiting_to_reset then
@@ -110,18 +131,66 @@ function new_button()
 			local disabled = is_button_drop_disabled()
 			local color = (not disabled and 12 or 13)
 
-			rectfill(start_x, start_y, start_x + 40, start_y + 10, color)
-			-- draw sides to make it look rounded on corners
-			line(start_x - 1, start_y + 1, start_x - 1, start_y + 9, color)
-			line(start_x + 41, start_y + 1, start_x + 41, start_y + 9, color)
+			-- rectfill(start_x, start_y, start_x + 40, start_y + 10, color)
+			-- -- draw sides to make it look rounded on corners
+			-- line(start_x - 1, start_y + 1, start_x - 1, start_y + 9, color)
+			-- line(start_x + 41, start_y + 1, start_x + 41, start_y + 9, color)
+			rounded_button_filled(start_x, start_y, start_x + 40, start_y + 10, "press ❎", color)
 
-			print("press ❎", start_x + 5, start_y + 3, 7)
+			-- print("press ❎", start_x + 5, start_y + 3, 7)
 		end,
 	}	
 end
 
 -->8
 -- utils
+-- center print text
+-- Helper function to split strings
+function split(str, delimiter)
+    local result = {}
+    local current = ""
+    for i = 1, #str do
+        local char = sub(str, i, i)
+        if char == delimiter then
+            if #current > 0 then
+                add(result, current)
+                current = ""
+            end
+        else
+            current = current .. char
+        end
+    end
+    if #current > 0 then
+        add(result, current)
+    end
+    return result
+end
+
+function cprint(text, y, color)
+	color = color or 7
+	print(text, 64 - #text * 2, y, color)
+end
+
+function rounded_button_filled(top_x, top_y, bottom_x, bottom_y, text, color)
+	local width = bottom_x - top_x
+	local height = bottom_y - top_y
+	rectfill(top_x, top_y, bottom_x, bottom_y, color)
+	line(top_x - 1, top_y + 1, top_x - 1, bottom_y - 1, color)
+	line(bottom_x + 1, top_y + 1, bottom_x + 1, bottom_y - 1, color)
+	print(text, top_x + (width / 2) - (#text * 2), top_y + (height / 2) - 2, 7)
+end
+
+function rounded_button(top_x, top_y, bottom_x, bottom_y, text, color)
+	local width = bottom_x - top_x
+	local height = bottom_y - top_y
+	-- rect(top_x, top_y, bottom_x, bottom_y, color)
+	line(top_x, top_y, bottom_x, top_y, color)
+	line(top_x, bottom_y, bottom_x, bottom_y, color)
+	line(top_x - 1, top_y + 1, top_x - 1, bottom_y - 1, color)
+	line(bottom_x + 1, top_y + 1, bottom_x + 1, bottom_y - 1, color)
+	print(text, top_x + (width / 2) - (#text * 2), top_y + (height / 2) - 2, color)
+end
+
 
 function new_point(x, y)
 	return {
@@ -380,6 +449,167 @@ new_bucket = function(value, x)
 
 	return bucket
 end
+-->8
+-- upgrades
+selected_option = 1
+function new_upgrades()
+	local padding = 4
+	local top_of_desc = 70
+	local num_columns = 2
+	local upgrade_texts = {
+		{ title = "buckets", description = "increase the value of each of the buckets", on_press = function()
+			for b in all(state.buckets) do
+				b.value += 1
+			end
+			state.money -= 1
+		end},
+		-- { title = "red coins", description = "unlock red coins (costs 1 coin)", on_press = function()
+		-- 	if state.money >= 1 then
+		-- 		state.special_coins.red += 1
+		-- 		state.money -= 1
+		-- 	end
+		-- end, id = 2 },
+		{ title = "coin cost", description = "increase how much it costs to drop a coin", on_press = function() end },
+		{ title = "coin value", description = "increase how much each coin is worth (increases cost to drop)", on_press = function()
+		end },
+		-- { title = "red coins", description = "unlock red coins (costs 1 coin)", on_press = function()
+		-- 	if state.money >= 1 then
+		-- 		state.special_coins.red += 1
+		-- 		state.money -= 1
+		-- 	end
+		-- end },
+		{ title = "bucket speed", description = "increase how quickly buckets fill up", on_press = function() end },
+		{ title = "coin speed", description = "increase how quickly coins fall", on_press = function() end },
+		{ title = "drop delay", description = "shorten the delay between coin drops", on_press = function() end },
+	}
+	local upgrade_options = {}
+	for i = 1, #upgrade_texts do
+		local column = ((i - 1) % num_columns) + 1
+		local row = flr((i - 1) / num_columns) + 1
+		local pair = upgrade_texts[i]
+		local x = padding + 8 + (column - 1) * 54
+		local y = padding + 16 + (row - 1) * 14
+		add(upgrade_options, new_upgrade_option(x, y, pair.title, pair.description, pair.on_press, i))
+		-- 	local pair = upgrade_texts[i]
+		-- 	local x = padding + 8 + (j - 1) * 54
+		-- 	local y = padding + 16 + ((i - 1) * 14)
+		-- 	add(upgrade_options, new_upgrade_option(x, y, pair.title, pair.description))
+		-- end
+		-- add(upgrade_options, new_upgrade_option(8, 16 + (#upgrade_options * 12), pair.title, pair.description))
+	end
+
+	return {
+		update = function(self)
+			if btnp(🅾️) then
+				state.mode = game_mode.drop
+			end
+
+			if btnp(❎) then
+				local option = upgrade_options[selected_option]
+				if option then
+					option:on_press()
+				end
+			end
+
+			local row = flr((selected_option - 1) / num_columns) + 1
+			local col = ((selected_option - 1) % num_columns) + 1
+			local num_rows = ceil(#upgrade_options / num_columns)
+
+			if btnp(⬅️) then
+				if col > 1 then
+					selected_option -= 1
+				end
+			elseif btnp(➡️) then
+				if col < num_columns and selected_option < #upgrade_options then
+					selected_option += 1
+				end
+			elseif btnp(⬆️) then
+				if row > 1 then
+					selected_option -= num_columns
+				end
+			elseif btnp(⬇️) then
+				if row < num_rows and selected_option + num_columns <= #upgrade_options then
+					selected_option += num_columns
+				end
+			end
+		end,
+
+		draw_description = function(self)
+			local option = upgrade_options[selected_option]
+			local desc = option.description
+			local max_len = 26  -- shorter lines work better on PICO-8
+			local lines = {}
+			local current_line = ""
+			
+			-- Split by words
+			for word in all(split(desc, " ")) do
+				if #current_line + #word + 1 <= max_len then
+						if #current_line > 0 then
+							current_line = current_line .. " " .. word
+						else
+							current_line = word
+						end
+				else
+						add(lines, current_line)
+						current_line = word
+				end
+			end
+			
+			if #current_line > 0 then
+				add(lines, current_line)
+			end
+			
+			-- Draw lines
+			for i = 1, #lines do
+				print(lines[i], padding * 2 + 2, top_of_desc + 3 + (i-1) * 8, 7)
+			end
+		end,
+
+		draw = function(self)
+			rectfill(padding, padding, 127 - padding, 127 - padding, 1)
+			rect(padding, padding, 127 - padding, 127 - padding, 12)
+			cprint("- upgrades -", 8, 7)
+			for option in all(upgrade_options) do
+				option:draw()
+			end
+			rounded_button(padding * 2, top_of_desc, 127 - padding * 2, 110, "", 7)
+			self.draw_description(self)
+			cprint("press 🅾️ to return", 115, 7)
+		end,
+	}
+end
+
+options_unlocked = {1, 2, 3, 4}
+
+function new_upgrade_option(x, y, title, description, on_press, id)
+	return {
+		title = title,
+		description = description,
+
+		on_press = function()
+			if not options_unlocked[id] then
+				return
+			end
+			on_press()
+			sfx(3)
+		end,
+
+		-- update = function(self)
+		-- 	on_press()
+		-- 	sfx(3)
+		-- end,
+
+		draw = function(self)
+			if not options_unlocked[id] then
+				rounded_button(x, y, x + 48, y + 10, self.title, 13)
+			elseif selected_option == id then
+				rounded_button_filled(x, y, x + 48, y + 10, self.title, 12)
+			else
+				rounded_button(x, y, x + 48, y + 10, self.title, 7)
+			end
+		end,
+	}
+end
 
 __gfx__
 00000000c00000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -390,12 +620,12 @@ __gfx__
 007007000ccccc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-70000070000000000aaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7000007000000000aaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7000007000000700aaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-7000007000007070aaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-70000070000007000aaa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-07777700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+70000070000000000aaa000005550000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+7000007000000000aaaaa00005050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+7000007000000700aaaaa00055555000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+7000007000007070aaaaa00055555000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+70000070000007000aaa000055555000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+07777700000000000000000055555000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
