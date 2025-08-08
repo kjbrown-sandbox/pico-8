@@ -8,16 +8,25 @@ consts = {
 	num_peg_rows = 9,
 }
 
-
 game_mode = {
 	drop = 1,
 	upgrade = 2,
 }
 
+user_level_requirements = {
+	0, -- level 1
+	10, -- level 2
+	100, -- level 3
+	1000, -- level 4
+	10000, -- level 5
+	100000, -- level 6
+	1000000, -- level 7
+}
+
 state = {
 	debug_text = "",
 	timers = {},
-	money = 10,
+	money = 1,
 	buckets = {},
 	special_coins = {
 		red = 0,
@@ -27,6 +36,9 @@ state = {
 	earnings_text = "",
 	disable_button_drop = false,
 	mode = game_mode.drop,
+	auto_drop = true,
+	drop_delay = 10,
+	user_level = 1,
 }
 
 function _init()
@@ -53,10 +65,10 @@ function _update()
 
 	if state.mode == game_mode.drop then
 		update_board()
-		drop_button:update()
 	elseif state.mode == game_mode.upgrade then
 		upgrades:update()
 	end
+	drop_button:update()
 end
 
 function _draw()
@@ -88,17 +100,8 @@ function draw_board()
 end
 
 function update_board()
-	local can_drop_coin = not is_button_drop_disabled()
-	if btnp(🅾️) then
+	if btnp(🅾️) and state.mode == game_mode.drop then
 		state.mode = game_mode.upgrade
-	elseif btnp(❎) and can_drop_coin then
-		if state.special_coins.red > 0 then
-			state.special_coins.red -= 1
-			add(state.fallings_coins, new_coin(coin_types.red))  -- red coin
-		else
-			add(state.fallings_coins, new_coin(coin_types.gold))  -- gold coin
-		end
-		state.money -= state.coin_cost
 	end
 end
 
@@ -108,6 +111,22 @@ end
 
 function new_drop_button()
 	return {
+		drop_coin = function(self)
+			if state.special_coins.red > 0 then
+				state.special_coins.red -= 1
+				add(state.fallings_coins, new_coin(coin_types.red))  -- red coin
+			else
+				add(state.fallings_coins, new_coin(coin_types.gold))  -- gold coin
+			end
+			state.money -= state.coin_cost
+
+			state.disable_button_drop = true
+			sfx(2)
+			wait_then_do(state.drop_delay, function()
+				state.disable_button_drop = false
+			end)
+		end,
+
 		update = function(self)
 			if self.waiting_to_reset then
 				-- do nothing
@@ -115,12 +134,8 @@ function new_drop_button()
 			end
 
 			local disabled = is_button_drop_disabled()
-			if btnp(❎) and not disabled then
-				state.disable_button_drop = true
-				sfx(2)
-				wait_then_do(1000, function()
-					state.disable_button_drop = false
-				end)
+			if not disabled and (btnp(❎) or state.auto_drop) then
+				self:drop_coin()
 			end
 		end,
 
@@ -135,7 +150,8 @@ function new_drop_button()
 			-- -- draw sides to make it look rounded on corners
 			-- line(start_x - 1, start_y + 1, start_x - 1, start_y + 9, color)
 			-- line(start_x + 41, start_y + 1, start_x + 41, start_y + 9, color)
-			rounded_button_filled(start_x, start_y, start_x + 40, start_y + 10, "press ❎", color)
+			local text = state.auto_drop and "auto drop" or "press ❎"
+			rounded_button_filled(start_x, start_y, start_x + 40, start_y + 10, text, color)
 
 			-- print("press ❎", start_x + 5, start_y + 3, 7)
 		end,
@@ -325,6 +341,11 @@ coin_types = {
 	red = 2,
 }
 
+coin_level_multiplier = {
+	1,  -- gold coin
+	10, -- red coin
+}
+
 function new_coin(level)
 	local coin = {}
 
@@ -332,7 +353,7 @@ function new_coin(level)
 	coin.state = coin_state.initial_drop
 	coin.speed = 0.7
 	coin.level = level or 1
-	coin.value_multiplier = 1
+	coin.value_multiplier = coin_level_multiplier[coin.level] or 1
 	coin.target_x = 0
 	coin.target_y = 0
 
@@ -397,6 +418,9 @@ function new_coin(level)
 				sfx(1)
 				wait_then_do(1000, function()
 					bucket.state = bucket_state.empty
+					if state.earnings_text == "+" .. money_earned then
+						state.earnings_text = ""
+					end
 				end)
 				del(state.fallings_coins, coin)
 				return true
@@ -425,11 +449,28 @@ bucket_state = {
 	full = 2,
 }
 
+bucket_level_color = {
+	10, -- gold
+	9, -- orange
+	8, -- red
+	4, -- brown
+}
+
 new_bucket = function(value, x)
 	local bucket = {}
 	bucket.value = value
 	bucket.pos = new_point(x, consts.top_of_buckets)
 	bucket.state = bucket_state.empty
+	bucket.level = 1
+
+	bucket.upgrade_bucket = function()
+		if bucket.value < 9 then
+			bucket.value += 1
+		else
+			bucket.value = 1  -- max value
+			bucket.level += 1
+		end
+	end
 
 	bucket.update = function()
 	end
@@ -444,7 +485,7 @@ new_bucket = function(value, x)
 				spr(16, bucket.pos.x, bucket.pos.y)
 			end
 		end
-		print(bucket.value, bucket.pos.x + 2, bucket.pos.y + 8, 7)
+		print(bucket.value, bucket.pos.x + 2, bucket.pos.y + 8, bucket_level_color[bucket.level])
 	end
 
 	return bucket
@@ -459,9 +500,9 @@ function new_upgrades()
 	local upgrade_texts = {
 		{ title = "buckets", description = "increase the value of each of the buckets", on_press = function()
 			for b in all(state.buckets) do
-				b.value += 1
+				b:upgrade_bucket()
 			end
-			state.money -= 1
+			state.money -= state.coin_cost
 		end},
 		-- { title = "red coins", description = "unlock red coins (costs 1 coin)", on_press = function()
 		-- 	if state.money >= 1 then
@@ -500,8 +541,9 @@ function new_upgrades()
 
 	return {
 		update = function(self)
-			if btnp(🅾️) then
+			if btnp(🅾️) and state.mode == game_mode.upgrade then
 				state.mode = game_mode.drop
+				return
 			end
 
 			if btnp(❎) then
@@ -610,6 +652,49 @@ function new_upgrade_option(x, y, title, description, on_press, id)
 		end,
 	}
 end
+-->8
+-- level ups
+function level_up_if_possible()
+	return {
+		update = function()
+		if state.user_level >= #user_level_requirements then
+			return
+		end
+
+		local next_level = state.user_level + 1
+		if state.money >= user_level_requirements[next_level] then
+			state.user_level = next_level
+			state.money -= user_level_requirements[next_level]
+			sfx(3)
+			-- state.debug_text = "level up! now at level " .. state.user_level
+
+			if state.user_level == 2 then
+			elseif state.user_level == 3 then
+				state.coin_cost = 2
+			elseif state.user_level == 4 then
+				state.coin_cost = 3
+			elseif state.user_level == 5 then
+				state.coin_cost = 4
+			elseif state.user_level == 6 then
+				state.coin_cost = 5
+			elseif state.user_level == 7 then
+				
+			end
+		-- else
+		-- 	state.debug_text = "not enough coins to level up"
+		end
+		end,
+
+		draw = function()
+			-- local next_level = state.user_level + 1
+			-- if next_level <= #user_level_requirements then
+			-- 	local requirement = user_level_requirements[next_level]
+			-- 	print("level up to " .. next_level .. " costs: " .. requirement, 0, 120, 7)
+			-- else
+			-- 	print("max level reached", 0, 120, 7)
+			-- end
+		end,}
+end
 
 __gfx__
 00000000c00000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -654,3 +739,4 @@ __sfx__
 990100002203000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
 011000003805538055380550000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005
 011000001955500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505005050050500505
+0003000013550155501a5501f55026550365500050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500
