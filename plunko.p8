@@ -11,16 +11,7 @@ consts = {
 game_mode = {
 	drop = 1,
 	upgrade = 2,
-}
-
-user_level_requirements = {
-	0, -- level 1
-	10, -- level 2
-	100, -- level 3
-	1000, -- level 4
-	10000, -- level 5
-	100000, -- level 6
-	1000000, -- level 7
+	leveling_up = 3,
 }
 
 state = {
@@ -39,6 +30,13 @@ state = {
 	auto_drop = false,
 	drop_delay = 1800,
 	user_level = 1,
+	shop_unlocked = false,
+	upgrades = {
+		buckets = 0,
+		coin_speed = 0,
+		coin_weight = 0,
+		drop_delay = 0,
+	}
 }
 
 function _init()
@@ -63,14 +61,14 @@ function _update()
 	for coin in all(state.fallings_coins) do
 		coin.update()
 	end
-	leveling.update()
-
+	
 	if state.mode == game_mode.drop then
 		update_board()
 	elseif state.mode == game_mode.upgrade then
 		upgrades:update()
 	end
 	drop_button:update()
+	leveling:update()
 end
 
 function _draw()
@@ -87,11 +85,13 @@ function _draw()
 			b.draw()
 		end
 		print(state.earnings_text, 126 - #state.earnings_text * 4, 9, 11)
-		leveling.draw()
+		leveling:draw()
 	elseif state.mode == game_mode.upgrade then
 		upgrades:draw()
 		-- cprint("coins: " .. state.money, 120, 7)
 		-- cprint("red coins: " .. state.special_coins.red, 120, 7)
+	elseif state.mode == game_mode.leveling_up then
+		leveling:draw()
 	end
 	print(state.debug_text, 0, 0, 7)
 
@@ -103,7 +103,7 @@ function draw_board()
 end
 
 function update_board()
-	if btnp(🅾️) and state.mode == game_mode.drop then
+	if btnp(🅾️) and state.shop_unlocked then
 		state.mode = game_mode.upgrade
 	end
 end
@@ -137,7 +137,7 @@ function new_drop_button()
 			end
 
 			local disabled = is_button_drop_disabled()
-			if not disabled and (btnp(❎) or state.auto_drop) then
+			if not disabled and ((btnp(❎) and state.mode == game_mode.drop) or state.auto_drop) then
 				self:drop_coin()
 			end
 		end,
@@ -167,7 +167,36 @@ end
 
 -->8
 -- utils
--- center print text
+
+function wprint(text, start_x, start_y, max_len)
+	local max_len = max_len or 26  -- shorter lines work better on PICO-8
+	local lines = {}
+	local current_line = ""
+	
+	-- Split by words
+	for word in all(split(text, " ")) do
+		if #current_line + #word + 1 <= max_len then
+				if #current_line > 0 then
+					current_line = current_line .. " " .. word
+				else
+					current_line = word
+				end
+		else
+				add(lines, current_line)
+				current_line = word
+		end
+	end
+	
+	if #current_line > 0 then
+		add(lines, current_line)
+	end
+	
+	-- Draw lines
+	for i = 1, #lines do
+		print(lines[i], start_x, start_y + (i-1) * 8, 7)
+	end
+end
+	
 -- Helper function to split strings
 function split(str, delimiter)
     local result = {}
@@ -499,53 +528,90 @@ new_bucket = function(value, x)
 end
 -->8
 -- upgrades
+upgrade_texts = {
+	{ title = "buckets", description = "increase the value of each of the buckets",
+		prereq = function()
+			return state.money - state.coin_cost >= 2^state.upgrades.buckets
+		end,
+		on_press = function()
+			for b in all(state.buckets) do
+				b:upgrade_bucket()
+			end
+			state.money -= 2^state.upgrades.buckets
+			state.upgrades.buckets += 1
+		end,
+		cost = function()
+			return 2^state.upgrades.buckets
+		end,
+	},
+	{ title = "coin value", description = "increase how much each coin is worth (increases cost to drop)",
+		prereq = function()
+			return state.money - state.coin_cost * 10 >= 10^state.upgrades.coin_weight
+		end,
+		on_press = function()
+			-- Example: increase coin value multiplier
+			state.upgrades.coin_weight += 1
+			state.coin_cost *= 10
+			state.money -= 10^state.upgrades.coin_weight
+		end,
+		cost = function()
+			return 10^state.upgrades.coin_weight
+		end,
+	},
+	{ title = "coin speed", description = "increase how quickly coins fall",
+		prereq = function()
+			return state.money - state.coin_cost >= 2^state.upgrades.coin_speed
+		end,
+		on_press = function()
+			state.upgrades.coin_speed += 1
+			state.money -= 2^state.upgrades.coin_speed
+		end,
+		cost = function()
+			return 2^state.upgrades.coin_speed
+		end,
+	},
+	{ title = "drop delay", description = "shorten the delay between coin drops",
+		prereq = function()
+			return state.money - state.coin_cost >= 2^state.upgrades.drop_delay
+		end,
+		on_press = function()
+			state.upgrades.drop_delay += 1
+			state.money -= 2^state.upgrades.drop_delay
+			-- Example: decrease drop delay
+			state.drop_delay = max(200, state.drop_delay - 200)
+		end,
+		cost = function()
+			return 2^state.upgrades.drop_delay
+		end,
+	},
+}
+
+
+num_columns = 2
+upgrade_options = {}
+upgrade_padding = 4
+function add_upgrade(upgrade_text)
+	-- Check if the upgrade already exists
+	for i = 1, #upgrade_options do
+		if upgrade_options[i].title == upgrade_text.title then
+			return  -- Upgrade already exists, do not add again
+		end
+	end
+
+	-- Add the new upgrade
+	local current_count = #upgrade_options
+	local column = (current_count % num_columns) + 1
+	local row = flr(current_count / num_columns) + 1
+	local x = upgrade_padding + 8 + (column - 1) * 54
+	local y = upgrade_padding + 16 + (row - 1) * 14
+	add(upgrade_options, new_upgrade_option(x, y, upgrade_text.title, upgrade_text.description, upgrade_text.prereq, upgrade_text.on_press, upgrade_text.cost, #upgrade_options + 1))
+end
+
 selected_option = 1
 function new_upgrades()
 	local padding = 4
 	local top_of_desc = 70
-	local num_columns = 2
-	local upgrade_texts = {
-		{ title = "buckets", description = "increase the value of each of the buckets", on_press = function()
-			for b in all(state.buckets) do
-				b:upgrade_bucket()
-			end
-			state.money -= state.coin_cost
-		end},
-		-- { title = "red coins", description = "unlock red coins (costs 1 coin)", on_press = function()
-		-- 	if state.money >= 1 then
-		-- 		state.special_coins.red += 1
-		-- 		state.money -= 1
-		-- 	end
-		-- end, id = 2 },
-		{ title = "coin cost", description = "increase how much it costs to drop a coin", on_press = function() end },
-		{ title = "coin value", description = "increase how much each coin is worth (increases cost to drop)", on_press = function()
-		end },
-		-- { title = "red coins", description = "unlock red coins (costs 1 coin)", on_press = function()
-		-- 	if state.money >= 1 then
-		-- 		state.special_coins.red += 1
-		-- 		state.money -= 1
-		-- 	end
-		-- end },
-		{ title = "bucket speed", description = "increase how quickly buckets fill up", on_press = function() end },
-		{ title = "coin speed", description = "increase how quickly coins fall", on_press = function() end },
-		{ title = "drop delay", description = "shorten the delay between coin drops", on_press = function() end },
-	}
-	local upgrade_options = {}
-	for i = 1, #upgrade_texts do
-		local column = ((i - 1) % num_columns) + 1
-		local row = flr((i - 1) / num_columns) + 1
-		local pair = upgrade_texts[i]
-		local x = padding + 8 + (column - 1) * 54
-		local y = padding + 16 + (row - 1) * 14
-		add(upgrade_options, new_upgrade_option(x, y, pair.title, pair.description, pair.on_press, i))
-		-- 	local pair = upgrade_texts[i]
-		-- 	local x = padding + 8 + (j - 1) * 54
-		-- 	local y = padding + 16 + ((i - 1) * 14)
-		-- 	add(upgrade_options, new_upgrade_option(x, y, pair.title, pair.description))
-		-- end
-		-- add(upgrade_options, new_upgrade_option(8, 16 + (#upgrade_options * 12), pair.title, pair.description))
-	end
-
+	
 	return {
 		update = function(self)
 			if btnp(🅾️) and state.mode == game_mode.upgrade then
@@ -553,10 +619,11 @@ function new_upgrades()
 				return
 			end
 
-			if btnp(❎) then
-				local option = upgrade_options[selected_option]
-				if option then
-					option:on_press()
+			local current_option = upgrade_options[selected_option]
+			if btnp(❎) and current_option:prereq() then
+				-- local option = upgrade_options[selected_option]
+				if current_option then
+					current_option:on_press()
 				end
 			end
 
@@ -584,33 +651,43 @@ function new_upgrades()
 		end,
 
 		draw_description = function(self)
+			-- local option = upgrade_options[selected_option]
+			-- local desc = option.description
+			-- local max_len = 26  -- shorter lines work better on PICO-8
+			-- local lines = {}
+			-- local current_line = ""
+			
+			-- -- Split by words
+			-- for word in all(split(desc, " ")) do
+			-- 	if #current_line + #word + 1 <= max_len then
+			-- 			if #current_line > 0 then
+			-- 				current_line = current_line .. " " .. word
+			-- 			else
+			-- 				current_line = word
+			-- 			end
+			-- 	else
+			-- 			add(lines, current_line)
+			-- 			current_line = word
+			-- 	end
+			-- end
+			
+			-- if #current_line > 0 then
+			-- 	add(lines, current_line)
+			-- end
+			
+			-- -- Draw lines
+			-- for i = 1, #lines do
+			-- 	print(lines[i], padding * 2 + 2, top_of_desc + 3 + (i-1) * 8, 7)
+			-- end
 			local option = upgrade_options[selected_option]
 			local desc = option.description
 			local max_len = 26  -- shorter lines work better on PICO-8
-			local lines = {}
-			local current_line = ""
-			
-			-- Split by words
-			for word in all(split(desc, " ")) do
-				if #current_line + #word + 1 <= max_len then
-						if #current_line > 0 then
-							current_line = current_line .. " " .. word
-						else
-							current_line = word
-						end
-				else
-						add(lines, current_line)
-						current_line = word
-				end
-			end
-			
-			if #current_line > 0 then
-				add(lines, current_line)
-			end
-			
-			-- Draw lines
-			for i = 1, #lines do
-				print(lines[i], padding * 2 + 2, top_of_desc + 3 + (i-1) * 8, 7)
+			wprint(desc, padding * 2 + 2, top_of_desc + 3, max_len)
+			local cost =  option:cost()
+			if option:prereq() then
+				cprint("cost: " .. cost, 100, 11)
+			else
+				cprint("cost: " .. cost, 100, 8)
 			end
 		end,
 
@@ -628,20 +705,24 @@ function new_upgrades()
 	}
 end
 
-options_unlocked = {1, 2, 3, 4}
+-- options_unlocked = {1, 2, 3, 4}
 
-function new_upgrade_option(x, y, title, description, on_press, id)
+function new_upgrade_option(x, y, title, description, prereq, on_press, cost, id)
 	return {
 		title = title,
 		description = description,
+		id = id,
 
 		on_press = function()
-			if not options_unlocked[id] then
-				return
-			end
+			-- if not options_unlocked[id] then
+			-- 	return
+			-- end
 			on_press()
 			sfx(3)
 		end,
+
+		prereq = prereq or function() return true end,
+		cost = cost or function() return 0 end,
 
 		-- update = function(self)
 		-- 	on_press()
@@ -649,10 +730,10 @@ function new_upgrade_option(x, y, title, description, on_press, id)
 		-- end,
 
 		draw = function(self)
-			if not options_unlocked[id] then
-				rounded_button(x, y, x + 48, y + 10, self.title, 13)
-			elseif selected_option == id then
+			if prereq() then
 				rounded_button_filled(x, y, x + 48, y + 10, self.title, 12)
+			elseif selected_option == id then
+				rounded_button(x, y, x + 48, y + 10, self.title, 13)
 			else
 				rounded_button(x, y, x + 48, y + 10, self.title, 7)
 			end
@@ -661,61 +742,97 @@ function new_upgrade_option(x, y, title, description, on_press, id)
 end
 -->8
 -- level ups
+
+user_level_requirements = {
+	0, -- level 1
+	10, -- level 2
+	100, -- level 3
+	1000, -- level 4
+	10000, -- level 5
+	100000, -- level 6
+	1000000, -- level 7
+}
+
+
 function level_up_if_possible()
 	return {
-		update = function()
-		if state.user_level >= #user_level_requirements then
-			return
-		end
-
-		local next_level = state.user_level + 1
-		if state.money >= user_level_requirements[next_level] then
-			state.user_level = next_level
-			sfx(3)
-			-- state.debug_text = "level up! now at level " .. state.user_level
-
-			if state.user_level == 2 then
-			elseif state.user_level == 3 then
-				state.coin_cost = 2
-			elseif state.user_level == 4 then
-				state.coin_cost = 3
-			elseif state.user_level == 5 then
-				state.coin_cost = 4
-			elseif state.user_level == 6 then
-				state.coin_cost = 5
-			elseif state.user_level == 7 then
-
+		description = "",
+		update = function(self)
+			if state.user_level >= #user_level_requirements then
+				return
 			end
-		-- else
-		-- 	state.debug_text = "not enough coins to level up"
-		end
-		end,
-
-		draw = function()
-			local bar_width = 80
-			local bar_height = 5
-			local padding = 24
-			local x = (128 - bar_width) / 2
-			local y = 122
 
 			local next_level = state.user_level + 1
-			if next_level <= #user_level_requirements then
-				local requirement = user_level_requirements[next_level]
-				local progress = min(state.money / requirement, 1)
-				-- background bar
-				rectfill(x, y, x + bar_width, y + bar_height, 5)
-				-- filled part
-				rectfill(x, y, x + flr(bar_width * progress), y + bar_height, 11)
-				-- border
-				rect(x, y, x + bar_width, y + bar_height, 7)
-				-- text
-				local txt = "lvl " .. state.user_level
-				local req = state.money .. "/" .. requirement
-				-- cprint(txt, y - 8, 7)
-				print(txt, 2, y, 7)
-				print(requirement, x + bar_width + 4, y, 7)
+			if state.money >= user_level_requirements[next_level] then
+				state.user_level = next_level
+				state.mode = game_mode.leveling_up
+				sfx(3)
+				-- state.debug_text = "level up! now at level " .. state.user_level
+
+				if state.user_level == 2 then
+					state.shop_unlocked = true
+					add_upgrade(upgrade_texts[1])  -- buckets
+					self.description = "you can now access the shop. press 🅾️ to open it."
+				elseif state.user_level == 3 then
+					add_upgrade(upgrade_texts[2])  -- coin value
+					self.description = "you can now increase the value of coins in the shop." 
+				elseif state.user_level == 4 then
+					state.coin_cost = 3
+				elseif state.user_level == 5 then
+					state.coin_cost = 4
+				elseif state.user_level == 6 then
+					state.coin_cost = 5
+				elseif state.user_level == 7 then
+
+				end
+			-- else
+			-- 	state.debug_text = "not enough coins to level up"
+			end
+
+			if state.mode == game_mode.leveling_up and btnp(❎) then
+				state.mode = game_mode.drop
+				state.description = ""
+			end
+		end,
+
+		draw = function(self)
+			local padding = 4
+			if state.mode == game_mode.leveling_up then
+				rectfill(padding, padding, 127 - padding, 127 - padding, 1)
+				rect(padding, padding, 127 - padding, 127 - padding, 12)
+				cprint("- level " .. state.user_level .. "! -", 10, 7)
+
+				-- wprint("you are now level " .. state.user_level, padding * 2 + 2, padding * 2 + 10)
+				wprint(self.description, padding * 2 + 2, padding * 2 + 20)
+
+				rounded_button(padding * 2, 100, 127 - padding * 2, 120, "press ❎ to return", 12)
 			else
-				cprint("max level reached", y - 8, 7)
+
+				local bar_width = 80
+				local bar_height = 5
+				local padding = 24
+				local x = (128 - bar_width) / 2
+				local y = 122
+
+				local next_level = state.user_level + 1
+				if next_level <= #user_level_requirements then
+					local requirement = user_level_requirements[next_level]
+					local progress = min(state.money / requirement, 1)
+					-- background bar
+					rectfill(x, y, x + bar_width, y + bar_height, 5)
+					-- filled part
+					rectfill(x, y, x + flr(bar_width * progress), y + bar_height, 11)
+					-- border
+					rect(x, y, x + bar_width, y + bar_height, 7)
+					-- text
+					local txt = "lvl " .. state.user_level
+					local req = state.money .. "/" .. requirement
+					-- cprint(txt, y - 8, 7)
+					print(txt, 2, y, 7)
+					print(requirement, x + bar_width + 4, y, 7)
+				else
+					cprint("max level reached", y - 8, 7)
+				end
 			end
 		end,
 	}
